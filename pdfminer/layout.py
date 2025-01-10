@@ -359,6 +359,7 @@ class LTChar(LTComponent, LTText):
         fontsize: float,
         scaling: float,
         rise: float,
+        cid: int,
         text: str,
         textwidth: float,
         textdisp: Union[float, Tuple[Optional[float], float]],
@@ -367,8 +368,12 @@ class LTChar(LTComponent, LTText):
     ) -> None:
         LTText.__init__(self)
         self._text = text
+        self.cid = cid
         self.matrix = matrix
         self.fontname = font.fontname
+        self.font = font
+        self.fontsize = fontsize
+        self.scaling = scaling
         self.ncs = ncs
         self.graphicstate = graphicstate
         self.adv = textwidth * fontsize * scaling

@@ -260,6 +260,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
             fontsize,
             scaling,
             rise,
+            cid,
             text,
             textwidth,
             textdisp,
