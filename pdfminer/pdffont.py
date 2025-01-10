@@ -970,6 +970,7 @@ class PDFSimpleFont(PDFFont):
             strm = stream_value(spec["ToUnicode"])
             self.unicode_map = FileUnicodeMap()
             CMapParser(self.unicode_map, BytesIO(strm.get_data())).run()
+        self.spec = spec
         PDFFont.__init__(self, descriptor, widths)
 
     def to_unichr(self, cid: int) -> str:
