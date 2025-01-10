@@ -1,6 +1,7 @@
 import io
 import logging
 import re
+from math import sqrt
 from typing import (
     BinaryIO,
     Dict,
@@ -162,13 +163,20 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                 for o, p in zip(operators, transformed_points)
             ]
 
+            scale_factor = sqrt(sum(x*x for x in self.ctm[:4]) / 2)
+            linewidth = gstate.linewidth * scale_factor
+            dashing_style = gstate.dash
+            if dashing_style:
+                dash, phase = dashing_style
+                dashing_style = ([x * scale_factor for x in dash], phase * scale_factor)
+
             if shape in {"mlh", "ml"}:
                 # single line segment
                 #
                 # Note: 'ml', in conditional above, is a frequent anomaly
                 # that we want to support.
                 line = LTLine(
-                    gstate.linewidth,
+                    linewidth,
                     pts[0],
                     pts[1],
                     stroke,
@@ -177,7 +185,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     gstate.scolor,
                     gstate.ncolor,
                     original_path=transformed_path,
-                    dashing_style=gstate.dash,
+                    dashing_style=dashing_style,
                 )
                 self.cur_item.add(line)
 
@@ -190,7 +198,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                 ) or (y0 == y1 and x1 == x2 and y2 == y3 and x3 == x0)
                 if is_closed_loop and has_square_coordinates:
                     rect = LTRect(
-                        gstate.linewidth,
+                        linewidth,
                         (*pts[0], *pts[2]),
                         stroke,
                         fill,
@@ -198,12 +206,12 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                         gstate.scolor,
                         gstate.ncolor,
                         transformed_path,
-                        gstate.dash,
+                        dashing_style,
                     )
                     self.cur_item.add(rect)
                 else:
                     curve = LTCurve(
-                        gstate.linewidth,
+                        linewidth,
                         pts,
                         stroke,
                         fill,
@@ -211,12 +219,12 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                         gstate.scolor,
                         gstate.ncolor,
                         transformed_path,
-                        gstate.dash,
+                        dashing_style,
                     )
                     self.cur_item.add(curve)
             else:
                 curve = LTCurve(
-                    gstate.linewidth,
+                    linewidth,
                     pts,
                     stroke,
                     fill,
@@ -224,7 +232,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     gstate.scolor,
                     gstate.ncolor,
                     transformed_path,
-                    gstate.dash,
+                    dashing_style,
                 )
                 self.cur_item.add(curve)
 
