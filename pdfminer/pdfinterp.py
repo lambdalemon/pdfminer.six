@@ -7,7 +7,7 @@ from pdfminer import settings
 from pdfminer.casting import safe_float
 from pdfminer.cmapdb import CMap, CMapBase, CMapDB
 from pdfminer.pdfcolor import PREDEFINED_COLORSPACE, PDFColorSpace
-from pdfminer.pdfdevice import PDFDevice, PDFTextSeq
+from pdfminer.pdfdevice import PDFDevice, PDFTextSeq, PDFTextDevice
 from pdfminer.pdfexceptions import PDFException, PDFValueError
 from pdfminer.pdffont import (
     PDFCIDFont,
@@ -876,7 +876,9 @@ class PDFPageInterpreter:
                 raise PDFInterpreterError("No font specified!")
             return
         assert self.ncs is not None
-        self.device.render_string(
+        inline_render = isinstance(self.textstate.font, PDFType3Font)
+        device = PDFType3FontInlineDevice(self) if inline_render else self.device
+        device.render_string(
             self.textstate,
             cast(PDFTextSeq, seq),
             self.ncs,
@@ -1024,3 +1026,27 @@ class PDFPageInterpreter:
                     raise PDFInterpreterError(error_msg)
             else:
                 self.push(obj)
+
+
+class PDFType3FontInlineDevice(PDFTextDevice):
+    def __init__(self, interpreter: PDFPageInterpreter):
+        super().__init__(interpreter.rsrcmgr)
+        self.interpreter = interpreter
+        self.ctm = interpreter.ctm
+
+    def render_char(self, matrix, font, fontsize, scaling, rise, cid, ncs, graphicstate):
+        assert isinstance(font, PDFType3Font)
+        argstack, self.interpreter.argstack = self.interpreter.argstack, []
+        state = self.interpreter.get_current_state()
+        fontsize_matrix : Matrix = (fontsize, 0, 0, fontsize, 0, 0)
+        glyph_ctm = mult_matrix(font.matrix, mult_matrix(fontsize_matrix, matrix))
+        self.interpreter.ctm = glyph_ctm
+        self.interpreter.device.set_ctm(glyph_ctm)
+
+        self.interpreter.execute([font.charprocs[cid]])
+
+        self.interpreter.argstack = argstack
+        self.interpreter.set_current_state(state)
+
+        adv = font.char_width(cid) * fontsize * scaling
+        return adv

@@ -124,3 +124,15 @@ class EncodingDB:
                         log.debug(str(e))
                     cid += 1
         return cid2unicode
+
+
+def cid2name_from_diff(diff: Iterable[object]) -> Dict[int, str]:
+    cid2name = {}
+    cid = 0
+    for x in diff:
+        if isinstance(x, int):
+            cid = x
+        elif isinstance(x, PSLiteral):
+            cid2name[cid] = cast(str, x.name)
+            cid += 1
+    return cid2name

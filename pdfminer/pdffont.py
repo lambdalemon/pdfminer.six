@@ -26,7 +26,7 @@ from pdfminer.cmapdb import (
     IdentityUnicodeMap,
     UnicodeMap,
 )
-from pdfminer.encodingdb import EncodingDB, name2unicode
+from pdfminer.encodingdb import EncodingDB, name2unicode, cid2name_from_diff
 from pdfminer.fontmetrics import FONT_METRICS
 from pdfminer.pdfexceptions import PDFException, PDFKeyError, PDFValueError
 from pdfminer.pdftypes import (
@@ -1078,6 +1078,9 @@ class PDFType3Font(PDFSimpleFont):
         self.matrix = cast(Matrix, tuple(list_value(spec.get("FontMatrix"))))
         (_, self.descent, _, self.ascent) = self.bbox
         (self.hscale, self.vscale) = apply_matrix_norm(self.matrix, (1, 1))
+        cid2name = cid2name_from_diff(dict_value(spec["Encoding"])['Differences'])
+        self.charprocs = {cid: stream_value(spec['CharProcs'][name])
+                          for cid, name in cid2name.items() if name in spec['CharProcs']}
 
     def __repr__(self) -> str:
         return "<PDFType3Font>"
