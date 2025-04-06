@@ -1037,7 +1037,7 @@ class PDFType3FontInlineDevice(PDFTextDevice):
     def render_char(self, matrix, font, fontsize, scaling, rise, cid, ncs, graphicstate):
         assert isinstance(font, PDFType3Font)
         argstack, self.interpreter.argstack = self.interpreter.argstack, []
-        state = self.interpreter.get_current_state()
+        ctm, _, graphicstate = self.interpreter.get_current_state()
         fontsize_matrix : Matrix = (fontsize, 0, 0, fontsize, 0, 0)
         glyph_ctm = mult_matrix(font.matrix, mult_matrix(fontsize_matrix, matrix))
         self.interpreter.ctm = glyph_ctm
@@ -1046,7 +1046,7 @@ class PDFType3FontInlineDevice(PDFTextDevice):
         self.interpreter.execute([font.charprocs[cid]])
 
         self.interpreter.argstack = argstack
-        self.interpreter.set_current_state(state)
+        self.interpreter.set_current_state((ctm, self.interpreter.textstate, graphicstate))
 
         adv = font.char_width(cid) * fontsize * scaling
         return adv
