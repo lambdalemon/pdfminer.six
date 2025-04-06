@@ -26,7 +26,7 @@ from pdfminer.cmapdb import (
     IdentityUnicodeMap,
     UnicodeMap,
 )
-from pdfminer.encodingdb import EncodingDB, name2unicode, cid2name_from_diff
+from pdfminer.encodingdb import EncodingDB, cid2unicode_from_encoding, SYMBOL_BUILTIN_ENCODING, ZAPFDINGBATS_BUILTIN_ENCODING
 from pdfminer.fontmetrics import FONT_METRICS
 from pdfminer.pdfexceptions import PDFException, PDFKeyError, PDFValueError
 from pdfminer.pdftypes import (
@@ -138,16 +138,13 @@ class Type1FontHeaderParser(PSStackParser[int]):
                 (cid, name) = self.nextobject()
             except PSEOF:
                 break
-            try:
-                self._cid2unicode[cid] = name2unicode(cast(str, name))
-            except KeyError as e:
-                log.debug(str(e))
+            self._cid2unicode[cid] = cast(str, name)
         return self._cid2unicode
 
     def do_keyword(self, pos: int, token: PSKeyword) -> None:
         if token is self.KEYWORD_PUT:
             ((_, key), (_, value)) = self.pop(2)
-            if isinstance(key, int) and isinstance(value, PSLiteral):
+            if isinstance(key, int) and isinstance(value, PSLiteral) and literal_name(value) != '.notdef':
                 self.add_results((key, literal_name(value)))
 
 
@@ -741,12 +738,10 @@ class CFFFont:
         else:
             raise PDFValueError("unsupported charset format: %r" % format)
 
-    def getstr(self, sid: int) -> Union[str, bytes]:
-        # This returns str for one of the STANDARD_STRINGS but bytes otherwise,
-        # and appears to be a needless source of type complexity.
+    def getstr(self, sid: int) -> str:
         if sid < len(self.STANDARD_STRINGS):
             return self.STANDARD_STRINGS[sid]
-        return self.string_index[sid - len(self.STANDARD_STRINGS)]
+        return self.string_index[sid - len(self.STANDARD_STRINGS)].decode('ascii')
 
 
 class TrueTypeFont:
@@ -987,20 +982,24 @@ class PDFSimpleFont(PDFFont):
         descriptor: Mapping[str, Any],
         widths: FontWidthDict,
         spec: Mapping[str, Any],
+        implicit_encoding: Union[PSLiteral, Dict[int, str]],
     ) -> None:
         # Font encoding is specified either by a name of
         # built-in encoding or a dictionary that describes
         # the differences.
+        diff = None
         if "Encoding" in spec:
             encoding = resolve1(spec["Encoding"])
+            if isinstance(encoding, dict):
+                base = encoding.get("BaseEncoding", implicit_encoding)
+                diff = list_value(encoding.get("Differences", []))
+            else:
+                base = encoding
         else:
-            encoding = LITERAL_STANDARD_ENCODING
-        if isinstance(encoding, dict):
-            name = literal_name(encoding.get("BaseEncoding", LITERAL_STANDARD_ENCODING))
-            diff = list_value(encoding.get("Differences", []))
-            self.cid2unicode = EncodingDB.get_encoding(name, diff)
-        else:
-            self.cid2unicode = EncodingDB.get_encoding(literal_name(encoding))
+            base = implicit_encoding
+        self.encoding = EncodingDB.get_encoding(base, diff)
+        self.cid2unicode = cid2unicode_from_encoding(self.encoding)
+
         self.unicode_map: Optional[UnicodeMap] = None
         if "ToUnicode" in spec:
             strm = stream_value(spec["ToUnicode"])
@@ -1040,20 +1039,32 @@ class PDFType1Font(PDFSimpleFont):
             # lastchar = int_value(spec.get('LastChar', 255))
             width_list = list_value(spec.get("Widths", [0] * 256))
             widths = {i + firstchar: resolve1(w) for (i, w) in enumerate(width_list)}
-        PDFSimpleFont.__init__(self, descriptor, widths, spec)
-        if "Encoding" not in spec and "FontFile" in descriptor:
+
+        implicit_encoding: Union[PSLiteral, Dict[int, str]]
+        if "FontFile" in descriptor:
             # try to recover the missing encoding info from the font file.
             self.fontfile = stream_value(descriptor.get("FontFile"))
             length1 = int_value(self.fontfile["Length1"])
             data = self.fontfile.get_data()[:length1]
             parser = Type1FontHeaderParser(BytesIO(data))
-            self.cid2unicode = parser.get_encoding()
-        if "FontFile3" in descriptor:
+            implicit_encoding = parser.get_encoding()
+        elif "FontFile3" in descriptor:
             self.fontfile3 = stream_value(descriptor.get("FontFile3"))
+            # SUS
             try:
-                self.cfffont = CFFFont(self.fontname, BytesIO(self.fontfile3.get_data()))
+                cfffont = CFFFont(self.basefont, BytesIO(self.fontfile3.get_data()))
+                self.cfffont = cfffont
+                implicit_encoding = {cid: cfffont.gid2name.get(gid) for cid, gid in cfffont.code2gid.items()}
             except PDFException:
-                self.cfffont = None
+                implicit_encoding = LITERAL_STANDARD_ENCODING
+        elif "FontDescriptor" not in spec and self.basefont == "Symbol":
+            implicit_encoding = SYMBOL_BUILTIN_ENCODING
+        elif "FontDescriptor" not in spec and self.basefont == "ZapfDingbats":
+            implicit_encoding = ZAPFDINGBATS_BUILTIN_ENCODING
+        else:
+            # SUPER SUS
+            implicit_encoding = LITERAL_STANDARD_ENCODING
+        PDFSimpleFont.__init__(self, descriptor, widths, spec, implicit_encoding)
 
     def __repr__(self) -> str:
         return "<PDFType1Font: basefont=%r>" % self.basefont
@@ -1074,13 +1085,12 @@ class PDFType3Font(PDFSimpleFont):
             descriptor = dict_value(spec["FontDescriptor"])
         else:
             descriptor = {"Ascent": 0, "Descent": 0, "FontBBox": spec["FontBBox"]}
-        PDFSimpleFont.__init__(self, descriptor, widths, spec)
+        PDFSimpleFont.__init__(self, descriptor, widths, spec, implicit_encoding={})
         self.matrix = cast(Matrix, tuple(list_value(spec.get("FontMatrix"))))
         (_, self.descent, _, self.ascent) = self.bbox
         (self.hscale, self.vscale) = apply_matrix_norm(self.matrix, (1, 1))
-        cid2name = cid2name_from_diff(dict_value(spec["Encoding"])['Differences'])
         self.charprocs = {cid: stream_value(spec['CharProcs'][name])
-                          for cid, name in cid2name.items() if name in spec['CharProcs']}
+                          for cid, name in self.encoding.items() if name in spec['CharProcs']}
 
     def __repr__(self) -> str:
         return "<PDFType3Font>"
