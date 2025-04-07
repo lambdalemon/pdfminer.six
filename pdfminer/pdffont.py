@@ -28,7 +28,7 @@ from pdfminer.cmapdb import (
 )
 from pdfminer.encodingdb import EncodingDB, cid2unicode_from_encoding, SYMBOL_BUILTIN_ENCODING, ZAPFDINGBATS_BUILTIN_ENCODING
 from pdfminer.fontmetrics import FONT_METRICS
-from pdfminer.pdfexceptions import PDFException, PDFKeyError, PDFValueError
+from pdfminer.pdfexceptions import PDFException, PDFKeyError, PDFValueError, PDFNotImplementedError
 from pdfminer.pdftypes import (
     PDFStream,
     dict_value,
@@ -168,6 +168,8 @@ def getdict(data: bytes) -> Dict[int, List[Union[float, int]]]:
             break
         b0 = ord(c)
         if b0 <= 21:
+            if b0 == 12:
+                b0 = (12, ord(fp.read(1)))
             d[b0] = stack
             stack = []
             continue
@@ -650,6 +652,8 @@ class CFFFont:
         self.subr_index = self.INDEX(self.fp)
         # Top DICT DATA
         self.top_dict = getdict(self.dict_index[0])
+        if (12,30) in self.top_dict:
+            raise PDFNotImplementedError("CFF CIDFont not implemented")
         (charset_pos,) = self.top_dict.get(15, [0])
         (encoding_pos,) = self.top_dict.get(16, [0])
         (charstring_pos,) = self.top_dict.get(17, [0])
