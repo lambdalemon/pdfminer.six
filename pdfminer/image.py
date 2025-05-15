@@ -1,13 +1,7 @@
 import os
 import os.path
 from io import BytesIO
-from typing import BinaryIO, Tuple
-
-try:
-    from typing import Literal
-except ImportError:
-    # Literal was introduced in Python 3.8
-    from typing_extensions import Literal  # type: ignore[assignment]
+from typing import Literal, Tuple
 
 from pdfminer.jbig2 import JBIG2StreamReader, JBIG2StreamWriter
 from pdfminer.layout import LTImage
@@ -20,7 +14,7 @@ from pdfminer.pdftypes import (
 
 PIL_ERROR_MESSAGE = (
     "Could not import Pillow. This dependency of pdfminer.six is not "
-    "installed by default. You need it to to save JPEG2000 and PNG images to a file. Install it "
+    "installed by default. You need it to to save JPEG2000 and BMP images to a file. Install it "
     "with `pip install 'pdfminer.six[image]'`"
 )
 
@@ -28,7 +22,7 @@ PIL_ERROR_MESSAGE = (
 class ImageWriter:
     """Write image to a file
 
-    Supports various image types: JPEG, JBIG2 and PNG
+    Supports various image types: JPEG, JBIG2 and bitmaps
     """
 
     def __init__(self, outdir: str) -> None:
@@ -40,10 +34,7 @@ class ImageWriter:
         """Save an LTImage to disk"""
         filters = image.stream.get_filters()
 
-        if not filters:
-            name = self._save_bytes(image)
-
-        elif filters[-1][0] in LITERALS_DCT_DECODE:
+        if filters[-1][0] in LITERALS_DCT_DECODE:
             name = self._save_jpeg(image)
 
         elif filters[-1][0] in LITERALS_JPX_DECODE:
@@ -118,28 +109,38 @@ class ImageWriter:
 
     def _save_bytes(self, image: LTImage) -> str:
         """Save an image without encoding, just bytes"""
-        name, path = self._create_unique_image_name(image, ".png")
         width, height = image.srcsize
-        channels = len(image.stream.get_data()) / width / height / (image.bits / 8)
+        channels = len(image.stream.get_data()) * 8 // (width * height * image.bits)
+        mode: Literal["1", "L", "RGB", "CMYK"]
+        if image.bits == 1:
+            mode = "1"
+        elif image.bits == 8 and channels == 1:
+            mode = "L"
+        elif image.bits == 8 and channels == 3:
+            mode = "RGB"
+        elif image.bits == 8 and channels == 4:
+            mode = "CMYK"
+        else:
+            return self._save_raw(image)
+
+        name, path = self._create_unique_image_name(image, ".bmp")
         with open(path, "wb") as fp:
             try:
                 from PIL import Image  # type: ignore[import]
             except ImportError:
                 raise ImportError(PIL_ERROR_MESSAGE)
-
-            mode: Literal["1", "L", "RGB", "CMYK"]
-            if image.bits == 1:
-                mode = "1"
-            elif image.bits == 8 and channels == 1:
-                mode = "L"
-            elif image.bits == 8 and channels == 3:
-                mode = "RGB"
-            elif image.bits == 8 and channels == 4:
-                mode = "CMYK"
-
             img = Image.frombytes(mode, image.srcsize, image.stream.get_data(), "raw")
             img.save(fp)
 
+        return name
+
+    def _save_raw(self, image: LTImage) -> str:
+        """Save an image with unknown encoding"""
+        ext = ".%d.%dx%d.img" % (image.bits, image.srcsize[0], image.srcsize[1])
+        name, path = self._create_unique_image_name(image, ext)
+
+        with open(path, "wb") as fp:
+            fp.write(image.stream.get_data())
         return name
 
     @staticmethod
