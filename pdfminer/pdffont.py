@@ -1092,8 +1092,9 @@ class PDFType3Font(PDFSimpleFont):
         self.matrix = cast(Matrix, tuple(list_value(spec.get("FontMatrix"))))
         (_, self.descent, _, self.ascent) = self.bbox
         (self.hscale, self.vscale) = apply_matrix_norm(self.matrix, (1, 1))
-        self.charprocs = {cid: stream_value(spec['CharProcs'][name])
-                          for cid, name in self.encoding.items() if name in spec['CharProcs']}
+        charprocs = dict_value(spec['CharProcs'])
+        self.charprocs = {cid: stream_value(charprocs[name])
+                          for cid, name in self.encoding.items() if name in charprocs}
 
     def __repr__(self) -> str:
         return "<PDFType3Font>"
